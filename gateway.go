@@ -7,7 +7,7 @@ import (
 	"net/netip"
 )
 
-// --- class
+// --- class v1.0.0
 type Gateway struct {
 	Directions  []Direction
 	connections []Connection
