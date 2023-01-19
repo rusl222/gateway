@@ -6,7 +6,7 @@ import (
 	"net/netip"
 )
 
-var Version string = "v0.2.1"
+var Version string = "v0.2.2"
 
 type Network int
 
@@ -24,8 +24,8 @@ type Gateway struct {
 	Servers []Direction
 }
 
-var client connection
-var servers []connection
+var client *connection
+var servers []*connection
 
 type Direction struct {
 	Net    Network
@@ -49,56 +49,20 @@ func (s Gateway) Run() error {
 		}
 	}
 
-	switch s.Client.Net {
-	case Udp:
-		log.Printf("Подключение %s - %s\n", s.Client.Self, s.Client.Remote)
-		conn1, err := net.DialUDP("udp", net.UDPAddrFromAddrPort(s.Client.Self), net.UDPAddrFromAddrPort(s.Client.Remote))
-		if err != nil {
-			log.Fatalf("Не удалось подключиться! %s - %s", s.Client.Self, s.Client.Remote)
-			return &net.OpError{Op: "DialUDP", Net: "udp"}
-		}
-		client = connection{
-			readBuffer: make([]byte, 300),
-			connUdp:    conn1}
-	case Tcp:
-		conn2, err := net.DialTCP("tcp", net.TCPAddrFromAddrPort(s.Client.Self), net.TCPAddrFromAddrPort(s.Client.Remote))
-		if err != nil {
-			log.Fatalf("Не удалось подключиться! %s - %s", s.Client.Self, s.Client.Remote)
-			return &net.OpError{Op: "DialTCP", Net: "tcp"}
-		}
-		client = connection{
-			readBuffer: make([]byte, 300),
-			connTcp:    conn2}
-
+	con1, err := s.connect(s.Client)
+	if err == nil {
+		client = con1
 	}
 
 	for _, dir := range s.Servers {
-		switch s.Client.Net {
-		case Udp:
-			log.Printf("Подключение %s - %s\n", dir.Self, dir.Remote)
-			conn1, err := net.DialUDP("udp", net.UDPAddrFromAddrPort(dir.Self), net.UDPAddrFromAddrPort(dir.Remote))
-			if err != nil {
-				log.Fatalf("Не удалось подключится! %s - %s", dir.Self, dir.Remote)
-			} else {
-				servers = append(servers, connection{
-					readBuffer: make([]byte, 300),
-					connUdp:    conn1})
-			}
-		case Tcp:
-			log.Printf("Подключение %s - %s\n", dir.Self, dir.Remote)
-			conn2, err := net.DialTCP("tcp", net.TCPAddrFromAddrPort(dir.Self), net.TCPAddrFromAddrPort(dir.Remote))
-			if err != nil {
-				log.Fatalf("Не удалось подключится! %s - %s", dir.Self, dir.Remote)
-			} else {
-				servers = append(servers, connection{
-					readBuffer: make([]byte, 300),
-					connTcp:    conn2})
-			}
+		con1, err := s.connect(dir)
+		if err == nil {
+			servers = append(servers, con1)
 		}
 	}
 
 	for _, con1 := range servers {
-		go s.transport(con1, []connection{client})
+		go s.transport(con1, []*connection{client})
 	}
 
 	s.transport(client, servers)
@@ -106,7 +70,7 @@ func (s Gateway) Run() error {
 	return nil
 }
 
-func (s Gateway) transport(src connection, dst []connection) {
+func (s Gateway) transport(src *connection, dst []*connection) {
 	for {
 		var n int
 		if src.connUdp != nil {
@@ -124,4 +88,31 @@ func (s Gateway) transport(src connection, dst []connection) {
 			}
 		}
 	}
+}
+
+func (s Gateway) connect(dir Direction) (*connection, error) {
+	var err error
+	switch dir.Net {
+	case Udp:
+		log.Printf("Подключение %s - %s\n", dir.Self, dir.Remote)
+		conn1, err := net.DialUDP("udp", net.UDPAddrFromAddrPort(dir.Self), net.UDPAddrFromAddrPort(dir.Remote))
+		if err != nil {
+			log.Fatalf("Не удалось подключится! %s - %s", dir.Self, dir.Remote)
+		} else {
+			return &connection{
+				readBuffer: make([]byte, 300),
+				connUdp:    conn1}, nil
+		}
+	case Tcp:
+		log.Printf("Подключение %s - %s\n", dir.Self, dir.Remote)
+		conn2, err := net.DialTCP("tcp", net.TCPAddrFromAddrPort(dir.Self), net.TCPAddrFromAddrPort(dir.Remote))
+		if err != nil {
+			log.Fatalf("Не удалось подключится! %s - %s", dir.Self, dir.Remote)
+		} else {
+			return &connection{
+				readBuffer: make([]byte, 300),
+				connTcp:    conn2}, nil
+		}
+	}
+	return nil, err
 }
