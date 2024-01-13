@@ -7,7 +7,7 @@ import (
 	"regexp"
 )
 
-var Version string = "v0.3.6"
+var Version string = "v0.3.7"
 
 type Network int
 
@@ -21,13 +21,13 @@ func (d Network) String() string {
 }
 
 type gateway struct {
-	Client  Direction
-	Servers []Direction
+	client  Direction
+	servers []Direction
 }
 
 type Gateway interface {
 	Run() error
-	SetConfig() error
+	SetConfig(client string, servers []string) error
 }
 
 func New() Gateway {
@@ -51,7 +51,7 @@ type connection struct {
 
 // Run Validate configuration and activate connections.
 func (s *gateway) Run() error {
-	for _, dir := range append(s.Servers, s.Client) {
+	for _, dir := range append(s.servers, s.client) {
 		if !dir.Self.IsValid() {
 			return &net.AddrError{Err: "Address not valid", Addr: dir.Self.String()}
 		}
@@ -60,12 +60,12 @@ func (s *gateway) Run() error {
 		}
 	}
 
-	con1, err := s.connect(s.Client)
+	con1, err := s.connect(s.client)
 	if err == nil {
 		client = con1
 	}
 
-	for _, dir := range s.Servers {
+	for _, dir := range s.servers {
 		con1, err := s.connect(dir)
 		if err == nil {
 			servers = append(servers, con1)
@@ -164,8 +164,8 @@ func (g *gateway) SetConfig(client string, servers []string) error {
 		dirs = append(dirs, dir)
 		log.Print(dir)
 	}
-	g.Client = dirs[0]
-	g.Servers = dirs[1:]
+	g.client = dirs[0]
+	g.servers = dirs[1:]
 
 	return nil
 }
