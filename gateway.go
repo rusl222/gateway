@@ -4,9 +4,10 @@ import (
 	"log"
 	"net"
 	"net/netip"
+	"regexp"
 )
 
-var Version string = "v0.2.2"
+var Version string = "v0.3.3"
 
 type Network int
 
@@ -19,9 +20,17 @@ func (d Network) String() string {
 	return [...]string{"udp", "tcp"}[d]
 }
 
-type Gateway struct {
+type gateway struct {
 	Client  Direction
 	Servers []Direction
+}
+
+type Gateway interface {
+	Run() error
+}
+
+func New() Gateway {
+	return &gateway{}
 }
 
 var client *connection
@@ -39,7 +48,8 @@ type connection struct {
 	connTcp    *net.TCPConn
 }
 
-func (s Gateway) Run() error {
+// Run Validate configuration and activate connections.
+func (s *gateway) Run() error {
 	for _, dir := range append(s.Servers, s.Client) {
 		if !dir.Self.IsValid() {
 			return &net.AddrError{Err: "Address not valid", Addr: dir.Self.String()}
@@ -70,7 +80,9 @@ func (s Gateway) Run() error {
 	return nil
 }
 
-func (s Gateway) transport(src *connection, dst []*connection) {
+// transport transmitting packets from the client to the servers
+// and in the revers direction.
+func (s *gateway) transport(src *connection, dst []*connection) {
 	for {
 		var n int
 		if src.connUdp != nil {
@@ -90,7 +102,8 @@ func (s Gateway) transport(src *connection, dst []*connection) {
 	}
 }
 
-func (s Gateway) connect(dir Direction) (*connection, error) {
+// connect Connecting all directions.
+func (s *gateway) connect(dir Direction) (*connection, error) {
 	var err error
 	switch dir.Net {
 	case Udp:
@@ -115,4 +128,43 @@ func (s Gateway) connect(dir Direction) (*connection, error) {
 		}
 	}
 	return nil, err
+}
+
+// SetConfig sets the configuration from lines like
+// for master:
+//
+//	"127.0.0.1:40001-127.0.0.1:40002, udp"
+//
+// for slaves: [
+//
+//	"127.0.0.1:40011-127.0.0.1:43011, tcp, client",
+//	"127.0.0.1:40012-127.0.0.1:43012, tcp, server",
+//	].
+func (g *gateway) SetConfig(client string, servers []string) error {
+
+	var validDirection = regexp.MustCompile(`\s*([0-9.]+:[0-9]+)\s*-\s*([0-9.]+:[0-9]+)\s*,\s*(tcp|udp)\s*,*\s*(server|client)*\s*`)
+
+	var dirs []Direction
+	for _, strdir := range append([]string{client}, servers...) {
+		if !validDirection.MatchString(strdir) {
+			return &net.ParseError{}
+		}
+		res := validDirection.FindAllStringSubmatch(strdir, -1)
+
+		var n Network = Udp
+		if res[0][3] == "tcp" {
+			n = Tcp
+		}
+		dir := Direction{
+			Net:    n,
+			Self:   netip.MustParseAddrPort(res[0][2]),
+			Remote: netip.MustParseAddrPort(res[0][3]),
+		}
+		dirs = append(dirs, dir)
+		log.Print(dir)
+	}
+	g.Client = dirs[0]
+	g.Servers = dirs[1:]
+
+	return nil
 }
