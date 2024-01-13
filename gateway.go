@@ -7,7 +7,7 @@ import (
 	"regexp"
 )
 
-var Version string = "v0.3.3"
+var Version string = "v0.3.4"
 
 type Network int
 
