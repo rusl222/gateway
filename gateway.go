@@ -7,7 +7,7 @@ import (
 	"regexp"
 )
 
-var Version string = "v0.3.4"
+var Version string = "v0.3.6"
 
 type Network int
 
@@ -27,6 +27,7 @@ type gateway struct {
 
 type Gateway interface {
 	Run() error
+	SetConfig() error
 }
 
 func New() Gateway {
