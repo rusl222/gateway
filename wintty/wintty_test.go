@@ -2,6 +2,7 @@ package wintty
 
 import (
 	"net/netip"
+	"os"
 	"testing"
 )
 
@@ -12,15 +13,15 @@ func TestParseComDirection(t *testing.T) {
 		hasError bool
 	}{
 		{
-			input: []byte("WINTTY=COM1; Serial Port 1"),
+			input: []byte("wintty=com1; Serial Port 1"),
 			expected: ComDirection{
-				Com:     "COM1",
+				Com:     "com1",
 				Comment: "Serial Port 1",
 			},
 			hasError: false,
 		},
 		{
-			input: []byte("WINTTY=com12; Another Serial Port"),
+			input: []byte("wintty=com12; Another Serial Port"),
 			expected: ComDirection{
 				Com:     "com12",
 				Comment: "Another Serial Port",
@@ -28,16 +29,12 @@ func TestParseComDirection(t *testing.T) {
 			hasError: false,
 		},
 		{
-			input: []byte("WINTTY=Com3"),
+			input: []byte("wintty=com3"),
 			expected: ComDirection{
-				Com:     "Com3",
+				Com:     "com3",
 				Comment: "",
 			},
 			hasError: false,
-		}, {
-			input:    []byte("WINTTY=Com 3"),
-			expected: ComDirection{},
-			hasError: true,
 		},
 		{
 			input:    []byte("INVALID INPUT"),
@@ -70,18 +67,19 @@ func TestParseChannelParam(t *testing.T) {
 		hasError bool
 	}{
 		{
-			input: []byte("channel_param=04,modem_cnf=\"gsm.cnf\"  ,ttylog"),
+			input: []byte("channel_param=04,modem_cnf=\"gsm.cnf\",ttylog"),
 			expected: ChannelParam{
 				Channel:  4,
-				Settings: "modem_cnf=\"gsm.cnf\"  ,ttylog",
+				Settings: "modem_cnf=\"gsm.cnf\",ttylog",
 			},
 			hasError: false,
 		},
 		{
-			input: []byte(" channel_param= 1,setting1,setting2"),
+			input: []byte("channel_param=1,setting1,setting2; comment"),
 			expected: ChannelParam{
 				Channel:  1,
 				Settings: "setting1,setting2",
+				Comment:  "comment",
 			},
 			hasError: false,
 		},
@@ -133,7 +131,7 @@ func TestParseIpDirection(t *testing.T) {
 		hasError bool
 	}{
 		{
-			input: []byte(" WINTTY=net:tcp,m:4001,192.168.0.2,4001,192.168.0.1; Moxa Port 1 mbm"),
+			input: []byte("wintty=net:tcp,m:4001,192.168.0.2,4001,192.168.0.1; Moxa Port 1 mbm"),
 			expected: IpDirection{
 				Network: "tcp",
 				Role:    "m",
@@ -144,7 +142,7 @@ func TestParseIpDirection(t *testing.T) {
 			hasError: false,
 		},
 		{
-			input: []byte("WINTTY=net:udp,1234,10.0.0.1,5678,10.0.0.2"),
+			input: []byte("wintty=net:udp,1234,10.0.0.1,5678,10.0.0.2"),
 			expected: IpDirection{
 				Network: "udp",
 				Role:    "",
@@ -176,5 +174,48 @@ func TestParseIpDirection(t *testing.T) {
 				t.Errorf("expected %+v, but got %+v", test.expected, ipDir)
 			}
 		}
+	}
+}
+
+func TestWintty_Read(t *testing.T) {
+	// Create a temporary file for the test
+	tempFile, err := os.CreateTemp("", "config_test_*.txt")
+	if err != nil {
+		t.Fatalf("Failed to create temporary file: %v", err)
+	}
+	defer os.Remove(tempFile.Name())
+
+	// Write test data to the file
+	testData := `
+	WINTTY=net:tcp,m:4001,192.168.0.2,4001,192.168.0.1; Moxa Port 1 mbm
+	WINTTY= net:tcp,s:4002,192.168.0.2,4001,192.168.0.2; Moxa Port 2 mbm
+	WINTTY=net:udp, 4003,192.168.0.2,4001,192.168.0.3; Moxa Port 3 mbm
+	WINTTY=COM1; Port 1 serial
+	channel_param=03, modem_cnf="gsm.cnf"
+	`
+	if _, err := tempFile.WriteString(testData); err != nil {
+		t.Fatalf("Failed to write test data: %v", err)
+	}
+	tempFile.Close()
+
+	// Create a Wintty instance and call the Read method
+	wt := Wintty{}
+	err = wt.Read(tempFile.Name())
+	if err != nil {
+		t.Fatalf("Read method returned an error: %v", err)
+	}
+
+	// Verify the results
+	if len(wt.TTY) != 4 {
+		t.Errorf("Expected 4 TTY entries, got %d", len(wt.TTY))
+	}
+
+	if len(wt.Params) != 1 {
+		t.Errorf("Expected 1 Param entry, got %d", len(wt.Params))
+	}
+
+	// Optionally, verify specific entries in wt.TTY and wt.Params
+	if wt.Params[3] != `modem_cnf="gsm.cnf"` {
+		t.Errorf(`Expected Params[3] to be 'modem_cnf="gsm.cnf"', got '%s'`, wt.Params[3])
 	}
 }

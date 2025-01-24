@@ -1,10 +1,13 @@
 package wintty
 
 import (
+	"bufio"
 	"errors"
 	"net/netip"
+	"os"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 const (
@@ -13,7 +16,8 @@ const (
 )
 
 type Wintty struct {
-	Record []interface{}
+	TTY    []interface{}
+	Params map[uint8]string
 }
 
 type ComDirection struct {
@@ -29,13 +33,56 @@ type IpDirection struct {
 	Comment string
 }
 
+// Read - reading a configuration text file with many
+// strings like " WINTTY=net:tcp,m:4001,192.168.0.2,4001,192.168.0.1; Moxa Port 1 mbm"
+func (wt *Wintty) Read(confpath string) error {
+	file, err := os.Open(confpath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	wt.Params = make(map[uint8]string)
+
+	scanner := bufio.NewScanner(file)
+	// optionally, resize scanner's capacity for lines over 64K, see next example
+	for scanner.Scan() {
+		bytes1 := CleanForRegex(scanner.Text())
+
+		dir := IpDirection{}
+		if err := ParseIpDirection(bytes1, &dir); err == nil {
+			wt.TTY = append(wt.TTY, dir)
+		}
+
+		com := ComDirection{}
+		if err := ParseComDirection(bytes1, &com); err == nil {
+			wt.TTY = append(wt.TTY, com)
+		}
+
+		param := ChannelParam{}
+		if err := ParseChannelParam(bytes1, &param); err == nil {
+			wt.Params[param.Channel] = param.Settings
+		}
+	}
+	return nil
+}
+
+func CleanForRegex(input string) []byte {
+	substr, comment, _ := strings.Cut(input, ";")
+	// Удаляем все пробелы и табуляции
+	cleaned := strings.ReplaceAll(substr, " ", "")
+	cleaned = strings.ReplaceAll(cleaned, "\t", "")
+	// Приводим все буквы к нижнему регистру
+	return []byte(strings.ToLower(cleaned) + ";" + comment)
+}
+
 // Parse parses the input byte slice and fills the IpDirection structure
 // 'WINTTY=net:tcp,m:4001,192.168.0.2,4001,192.168.0.1; Moxa Port 1 mbm'.
 func ParseIpDirection(input []byte, ipDir *IpDirection) error {
 	var err error
 
 	// Define the regular expression pattern
-	pattern := `\s*WINTTY.*=.*net.*:.*(tcp|udp),\s*(m|s|p)?:?\s*(\d+),([\d\.]+),(\d+),([\d\.]+);*\s*(.*)?`
+	pattern := `wintty=net:(tcp|udp),(m|s|p)?:?(\d+),([\d\.]+),(\d+),([\d\.]+);?\s*(.*)?`
 	re := regexp.MustCompile(pattern)
 
 	// Find matches
@@ -65,7 +112,7 @@ func ParseIpDirection(input []byte, ipDir *IpDirection) error {
 
 func ParseComDirection(input []byte, ComDir *ComDirection) error {
 	// Define the regular expression pattern
-	pattern := `\s*WINTTY\s*=\s*(COM|com|Com)(\d+)\s*;*\s*(.*)?`
+	pattern := `wintty=(com)(\d+);?\s*(.*)?`
 	re := regexp.MustCompile(pattern)
 
 	// Find matches
@@ -83,12 +130,13 @@ func ParseComDirection(input []byte, ComDir *ComDirection) error {
 type ChannelParam struct {
 	Channel  uint8
 	Settings string
+	Comment  string
 }
 
 // channel_param=04,modem_cnf="gsm.cnf"  ,ttylog
 func ParseChannelParam(input []byte, channelParam *ChannelParam) error {
 	// Define the regular expression pattern
-	pattern := `\s*channel_param\s*=\s*(\d+)\s*,(.*)`
+	pattern := `channel_param=(\d+),([\w=,".]*);?\s*(.*)?`
 	re := regexp.MustCompile(pattern)
 
 	// Find matches
@@ -104,6 +152,7 @@ func ParseChannelParam(input []byte, channelParam *ChannelParam) error {
 	}
 	channelParam.Channel = uint8(channel)
 	channelParam.Settings = string(matches[2])
+	channelParam.Comment = string(matches[3])
 	return nil
 }
 
